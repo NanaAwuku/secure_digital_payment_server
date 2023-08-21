@@ -1,72 +1,83 @@
-import { useState } from "react";
-import server from "./server";
-import { sha256 } from "ethereum-cryptography/sha256";
-import { utf8ToBytes, toHex } from "ethereum-cryptography/utils";
-import { secp256k1 as secp } from "ethereum-cryptography/secp256k1";
+import {useState} from "react";
+import server from "./server.js";
+import signMessage from "./helpers.js";
 
-function Transfer({ address, setBalance, privateKey }) {
-  const [sendAmount, setSendAmount] = useState("");
-  const [recipient, setRecipient] = useState("");
+// import process from 'process';
 
-  const setValue = (setter) => (evt) => setter(evt.target.value);
+function Transfer({address, setBalance}) {
+    const [sendAmount, setSendAmount] = useState("");
+    const [recipient, setRecipient] = useState("");
 
-  async function transfer(evt) {
-    evt.preventDefault();
+    const setValue = (setter) => (evt) => setter(evt.target.value);
 
-    const dataToSend = {
-      sender: address,
-      amount: parseInt(sendAmount),
-      recipient,
-    };
-    const PRIVATE_KEY =
-      "643b7effbe48d491bab7dc3839d841ec1bdf7b2942357964dad2bb839726dcd1";
-    // Convert the data to a string and hash it
-    const dataString = JSON.stringify(dataToSend);
-    const dataBytes = utf8ToBytes(dataString);
-    const hash = sha256(dataBytes);
-    console.log(`Hash of data to send: ${toHex(hash)}`);
+    async function transfer(event) {
+        event.preventDefault();
 
-    const signature = secp.sign(hash, PRIVATE_KEY);
-    console.log("signed msg: ", signature);
+        try {
+            for (const [field, value] of Object.entries({sendAmount, recipient, address})) {
+                const message = value === "" ? "empty" : value
 
-    try {
-      const response = await server.post(`send`, {
-        ...dataToSend,
-        signature: toHex(signature),
-      });
-      const { balance } = response.data;
-      setBalance(balance);
-      alert("Data sent successfully!");
-    } catch (ex) {
-      alert(ex.response.data.message);
+                if (field === 'sendAmount' && [null, "", 0].includes(value)) return alert(`Field '${field}' cannot be ${message}`)
+                if (field === 'recipient' && [null, "null", ""].includes(value)) return alert(`Field '${field}' cannot be ${message}`)
+                if (field === 'address' && [null, "null", ""].includes(value)) return alert(`Wallet '${field}' cannot be ${message}`)
+            }
+
+            const privateKey = '643b7effbe48d491bab7dc3839d841ec1bdf7b2942357964dad2bb839726dcd1'
+            const data = {
+                sender: address,
+                amount: parseInt(sendAmount),
+                recipient,
+            }
+            const sign = signMessage(data, privateKey);
+            const serializedSignature = {
+                r: sign._signedMessage.r.toString(),
+                s: sign._signedMessage.s.toString(),
+                recovery: sign._signedMessage.recovery.toString(),
+                hashedData: sign.hashedMessage,
+                publicKey: sign.publicKey
+            };
+
+            await server.post(`send`, {...serializedSignature, ...data})
+                .then(response => {
+                    if (response.status === 200) {
+                        setBalance(response.data.balance);
+                        alert(`Debit of ${sendAmount} on Wallet: ${address} successful`)
+                    }
+                }).catch(error => {
+                    if (error.response.data) alert(error.response.data.message)
+                    console.log(error)
+                    alert("Digital Signature verification unsuccessful!")
+                });
+        } catch (exception) {
+            console.log(exception);
+        }
     }
-  }
 
-  return (
-    <form className="container transfer" onSubmit={transfer}>
-      <h1>Send Transaction</h1>
+    return (
+        <form className="container transfer" onSubmit={transfer}>
+            <h1>Send Transaction</h1>
 
-      <label>
-        Send Amount
-        <input
-          placeholder="1, 2, 3..."
-          value={sendAmount}
-          onChange={setValue(setSendAmount)}
-        ></input>
-      </label>
+            <label>
+                Send Amount
+                <input
+                    placeholder="1, 2, 3..."
+                    value={sendAmount}
+                    onChange={setValue(setSendAmount)}
+                />
+            </label>
 
-      <label>
-        Recipient
-        <input
-          placeholder="Type an address, for example: 0x2"
-          value={recipient}
-          onChange={setValue(setRecipient)}
-        ></input>
-      </label>
+            <label>
+                Recipient
+                <input
+                    placeholder="Type an address, for example: 0x2"
+                    value={recipient}
+                    onChange={setValue(setRecipient)}
+                />
+            </label>
 
-      <input type="submit" className="button" value="Transfer" />
-    </form>
-  );
+            <input type="submit" className="button" value="Transfer"/>
+        </form>
+    );
 }
 
 export default Transfer;
